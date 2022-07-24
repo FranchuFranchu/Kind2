@@ -1589,7 +1589,7 @@ pub fn u64_to_name(num: u64) -> String {
 // ========
 
 pub fn derive_type(tipo: &NewType) -> Derived {
-  let path = format!("{}/_.kind2", tipo.name);
+  let path = format!("{}/_.kind2", tipo.name.replace(".", "/"));
   let name = format!("{}", tipo.name);
   let mut args = vec![];
   for par in &tipo.pars {
@@ -1608,7 +1608,7 @@ pub fn derive_type(tipo: &NewType) -> Derived {
 
 pub fn derive_ctr(tipo: &NewType, index: usize) -> Derived {
   if let Some(ctr) = tipo.ctrs.get(index) {
-    let path = format!("{}/{}.kind2", tipo.name, ctr.name);
+    let path = format!("{}/{}.kind2", tipo.name.replace(".", "/"), ctr.name);
     let name = format!("{}.{}", tipo.name, ctr.name);
     let mut args = vec![];
     for arg in &tipo.pars {
@@ -1637,7 +1637,7 @@ pub fn derive_match(ntyp: &NewType) -> Derived {
   // List.match t (List.nil t)            p nil cons = nil
   // List.match t (List.cons t head tail) p nil cons = (cons head tail)
 
-  let path = format!("{}/match.kind2", ntyp.name);
+  let path = format!("{}/match.kind2", ntyp.name.replace(".", "/"));
 
   fn gen_type_ctr(ntyp: &NewType) -> Box<Term> {
     Box::new(Term::Ctr {
