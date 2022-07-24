@@ -44,8 +44,13 @@ Main : (IO (Result () String)) {
 
 For more examples, check the [Wikind](https://github.com/kindelia/wikind).
 
+<<<<<<< HEAD
 Install
 -------
+=======
+Installation
+------------
+>>>>>>> c5295e9c0872351981dc78a5efefa0c6e4f5cd79
 
 Install [Rust](https://www.rust-lang.org/tools/install) first, then enter:
 
