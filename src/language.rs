@@ -1480,21 +1480,15 @@ pub fn compile_term(term: &Term, quote: bool, lhs: bool) -> String {
       format!("({} {} {} {})", if quote { "Ann" } else { "ANN" }, hide(orig,lhs), compile_term(expr, quote, lhs), compile_term(tipo, quote, lhs))
     }
     Term::Ctr { orig, name, args } => {
-      let mut args_strs : Vec<String> = Vec::new();
-      for arg in args {
-        args_strs.push(format!(" {}", compile_term(arg, quote, lhs)));
-      }
-      format!("(Ct{} {}. {}{})", args.len(), name, hide(orig,lhs), args_strs.join(""))
+      let args_strs: Vec<String> = args.iter().map(|arg| compile_term(arg, quote, lhs)).collect();
+      format!("(CtX {}. {} {})", name, hide(orig,lhs), compile_list(&args_strs))
     }
     Term::Fun { orig, name, args } => {
-      let mut args_strs : Vec<String> = Vec::new();
-      for arg in args {
-        args_strs.push(format!(" {}", compile_term(arg, quote, lhs)));
-      }
+      let args_strs: Vec<String> = args.iter().map(|arg| compile_term(arg, quote, lhs)).collect();
       if quote {
-        format!("(Fn{} {}. {}{})", args.len(), name, hide(orig,lhs), args_strs.join(""))
+        format!("(FnX {}. {} {})", name, hide(orig,lhs), compile_list(&args_strs))
       } else {
-        format!("(F${} {}{})", name, hide(orig,lhs), args_strs.join(""))
+        format!("(F${} {} {})", name, hide(orig,lhs), compile_list(&args_strs))
       }
     }
     Term::Hlp { orig } => {
@@ -1540,6 +1534,17 @@ pub fn compile_oper(oper: &Oper) -> String {
   }
 }
 
+// Creates a cons list from a list of strings
+pub fn compile_list(list: &[String]) -> String {
+  if list.len() > 0 {
+    let (head, tail) = list.split_at(1);
+    format!("(List.cons ({}) {})", head[0], compile_list(tail))
+  } else {
+    format!("List.nil")
+  }
+  
+}
+
 pub fn compile_entry(entry: &Entry) -> String {
   fn compile_type(args: &Vec<Box<Argument>>, tipo: &Box<Term>, index: usize) -> String {
     if index < args.len() {
@@ -1556,8 +1561,8 @@ pub fn compile_entry(entry: &Entry) -> String {
       vars.push(format!(" x{}", idx));
     }
     let mut text = String::new();
-    text.push_str(&format!("(Q${} orig{}) = (Fn{} {}. orig{})\n", name, vars.join(""), size, name, vars.join("")));
-    text.push_str(&format!("(F${} orig{}) = (Fn{} {}. orig{})\n", name, vars.join(""), size, name, vars.join("")));
+    text.push_str(&format!("(Q${} orig args) = (FnX {}. orig args)\n", name, name));
+    text.push_str(&format!("(F${} orig args) = (FnX {}. orig args)\n", name, name));
     return text;
   }
 
@@ -1569,8 +1574,8 @@ pub fn compile_entry(entry: &Entry) -> String {
     let body_rhs = compile_term(&rule.body, true, false);
     let rule_rhs = compile_term(&rule.body, false, false);
     let mut text = String::new();
-    text.push_str(&format!("(Q${} orig{}) = {}\n", rule.name, pats.join(""), body_rhs));
-    text.push_str(&format!("(F${} orig{}) = {}\n", rule.name, pats.join(""), rule_rhs));
+    text.push_str(&format!("(Q${} orig {}) = {}\n", rule.name, compile_list(&pats), body_rhs));
+    text.push_str(&format!("(F${} orig {}) = {}\n", rule.name, compile_list(&pats), rule_rhs));
 
   //for size in 0 .. 9 {
     //let mut vars = vec![];
@@ -1593,7 +1598,7 @@ pub fn compile_entry(entry: &Entry) -> String {
       let tail = compile_rule_chk(rule, index + 1, vars, args);
       return format!("(LHS {} {})", head, tail);
     } else {
-      return format!("(RHS (QT{} {}. 0{}))", index, rule.name, args.iter().map(|x| format!(" {}", x)).collect::<Vec<String>>().join(""));
+      return format!("(RHS (QT {}. 0 {}))", rule.name, compile_list(&args.iter().cloned().collect::<Vec<String>>()));
     }
   }
 
@@ -1609,13 +1614,12 @@ pub fn compile_entry(entry: &Entry) -> String {
       Term::Ctr { orig, name, args } => {
         let mut inp_args_str = String::new();
         let mut var_args_str = String::new();
-        for arg in args {
-          let (inp_arg_str, var_arg_str) = compile_patt_chk(arg, vars);
-          inp_args_str.push_str(&format!(" {}", inp_arg_str));
-          var_args_str.push_str(&format!(" {}", var_arg_str));
-        }
-        let inp_str = format!("(Ct{} {}. {}{})", args.len(), name, orig, inp_args_str);
-        let var_str = format!("(Ct{} {}. {}{})", args.len(), name, orig, var_args_str);
+        let (inp_args, var_args): (Vec<_>, Vec<_>) = args.iter()
+          .map(|arg| compile_patt_chk(arg, vars))
+          .unzip();
+        
+        let inp_str = format!("(CtX {}. {} {})", name, orig, compile_list(&inp_args));
+        let var_str = format!("(CtX {}. {} {})", name, orig, compile_list(&var_args));
         return (inp_str, var_str);
       }
       Term::Num { orig, numb } => {
@@ -1634,9 +1638,9 @@ pub fn compile_entry(entry: &Entry) -> String {
   result.push_str(&format!("(HashOf {}.) = %{}\n", entry.name, entry.name));
   result.push_str(&format!("(TypeOf {}.) = {}\n", entry.name, compile_type(&entry.args, &entry.tipo, 0)));
 
-  let base_vars = (0 .. entry.args.len()).map(|x| format!(" x{}", x)).collect::<Vec<String>>().join("");
-  result.push_str(&format!("(FN{} {}. orig{}) = (F${} orig{})\n", entry.args.len(), entry.name, base_vars, entry.name, base_vars));
-  result.push_str(&format!("(QT{} {}. orig{}) = (Q${} orig{})\n", entry.args.len(), entry.name, base_vars, entry.name, base_vars));
+  let base_vars = (0 .. entry.args.len()).map(|x| format!("x{}", x)).collect::<Vec<String>>();
+  result.push_str(&format!("(FNX {}. orig args) = (F${} orig args)\n", entry.name, entry.name));
+  result.push_str(&format!("(QT {}. orig args) = (Q${} orig args)\n", entry.name, entry.name));
 
   for rule in &entry.rules {
     result.push_str(&compile_rule(&rule));
