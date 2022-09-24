@@ -23,7 +23,7 @@ pub fn to_hvm_term(book: &Book, term: &Term) -> String {
       let argm = to_hvm_term(book, argm);
       format!("({} {})", func, argm)
     }
-    Term::All { orig: _, name, tipo, body } => {
+    Term::All { orig: _, name, self_name, tipo, body } => {
       let body = to_hvm_term(book, body);
       format!("0")
     }

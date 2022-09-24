@@ -60,7 +60,7 @@ pub enum Oper {
 pub enum Term {
   Typ { orig: u64 },
   Var { orig: u64, name: String },
-  All { orig: u64, name: String, tipo: Box<Term>, body: Box<Term> },
+  All { orig: u64, name: String, tipo: Box<Term>, self_name: Option<String>, body: Box<Term> },
   Lam { orig: u64, name: String, body: Box<Term> },
   App { orig: u64, func: Box<Term>, argm: Box<Term> },
   Let { orig: u64, name: String, expr: Box<Term>, body: Box<Term> },
@@ -302,13 +302,19 @@ pub fn adjust_term(book: &Book, term: &Term, rhs: bool, eras: &mut u64, holes: &
         }
       }
     },
-    Term::All { ref orig, ref name, ref tipo, ref body } => {
+    Term::All { ref orig, ref name, ref tipo, ref self_name, ref body } => {
       let orig = *orig;
       let tipo = Box::new(adjust_term(book, &*tipo, rhs, eras, holes, vars, types)?);
       vars.push(name.clone());
+      if let Some(self_name) = self_name.as_ref() {
+        vars.push(self_name.clone());
+      }
       let body = Box::new(adjust_term(book, &*body, rhs, eras, holes, vars, types)?);
       vars.pop();
-      Ok(Term::All { orig, name: name.clone(), tipo, body })
+      if let Some(self_name) = self_name.as_ref() {
+        vars.pop();
+      }
+      Ok(Term::All { orig, name: name.clone(), tipo, self_name: self_name.clone(), body })
     },
     Term::Lam { ref orig, ref name, ref body } => {
       let orig = *orig;
@@ -850,6 +856,7 @@ pub fn parse_lam(state: parser::State) -> parser::Answer<Option<Box<Term>>> {
 pub fn parse_all(state: parser::State) -> parser::Answer<Option<Box<Term>>> {
   parser::guard(
     Box::new(|state| {
+      let (state, self_name) = parser::name(state)?;
       let (state, all0) = parser::text("(", state)?;
       let (state, name) = parser::name(state)?;
       let (state, all1) = parser::text(":", state)?;
@@ -858,6 +865,8 @@ pub fn parse_all(state: parser::State) -> parser::Answer<Option<Box<Term>>> {
     }),
     Box::new(|state| {
       let (state, init) = get_init_index(state)?;
+      let (state, self_name) = parser::name(state)?;
+      let self_name = if self_name.len() > 0 { Some(self_name) } else { None };
       let (state, _)    = parser::consume("(", state)?;
       let (state, name) = parser::name1(state)?;
       let (state, _)    = parser::consume(":", state)?;
@@ -871,14 +880,14 @@ pub fn parse_all(state: parser::State) -> parser::Answer<Option<Box<Term>>> {
         Ok((state, Box::new(Term::Ann {
           orig,
           expr: Box::new(Term::Lam { orig, name: name.clone(), body }),
-          tipo: Box::new(Term::All { orig, name: name.clone(), tipo, body: Box::new(Term::Hol { orig, numb: 0 }) }),
+          tipo: Box::new(Term::All { orig, name: name.clone(), tipo, self_name, body: Box::new(Term::Hol { orig, numb: 0 }) }),
         })))
       } else {
         let (state, _)    = parser::text("->", state)?;
         let (state, body) = parse_apps(state)?;
         let (state, last) = get_last_index(state)?;
         let orig          = origin(0, init, last);
-        Ok((state, Box::new(Term::All { orig, name, tipo, body })))
+        Ok((state, Box::new(Term::All { orig, name, tipo, self_name, body })))
       }
     }),
     state,
@@ -1239,7 +1248,7 @@ pub fn parse_arr(state: parser::State) -> parser::Answer<Option<Box<dyn Fn(usize
         let orig = origin(0, init, last);
         let name = "_".to_string();
         let body = body.clone();
-        Box::new(Term::All { orig, name, tipo, body })
+        Box::new(Term::All { orig, name, tipo, self_name: None, body })
       })))
     }),
     state,
@@ -1739,6 +1748,7 @@ pub fn load_newtype_cached(cache: &mut HashMap<String, Rc<NewType>>, name: &str)
 // =====================
 
 pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
+  println!("{:?}", term);
   fn hide(orig: &u64, lhs: bool) -> String {
     if lhs {
       "orig".to_string()
@@ -1761,8 +1771,8 @@ pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
         }
       }
     }
-    Term::All { orig, name, tipo, body } => {
-      format!("(Kind.Term.all {} {} {} λ{} {})", hide(orig,lhs), name_to_u64(name), to_checker_term(tipo, quote, lhs), name, to_checker_term(body, quote, lhs))
+    Term::All { orig, name, tipo, self_name, body } => {
+      format!("(Kind.Term.all {} {} {} {} λ{} λ{} {})", hide(orig,lhs), name_to_u64(name), to_checker_term(tipo, quote, lhs), self_name.clone().map(|x| name_to_u64(&x)).unwrap_or(63), name, self_name.as_ref().map(|x| x.as_ref()).unwrap_or("_"), to_checker_term(body, quote, lhs))
     }
     Term::Lam { orig, name, body } => {
       format!("(Kind.Term.lam {} {} λ{} {})", hide(orig,lhs), name_to_u64(name), name, to_checker_term(body, quote, lhs))
@@ -1795,6 +1805,7 @@ pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
       for arg in args {
         args_strs.push(format!(" {}", to_checker_term(arg, quote, lhs)));
       }
+      let quote = true;
       if quote {
         if args.len() >= 7 {
           format!("(Kind.Term.fn{} {}. {}(Kind.Term.args{} {}))", args.len(), name, hide(orig,lhs), args.len(), args_strs.join(""))
@@ -1852,7 +1863,7 @@ pub fn to_checker_entry(entry: &Entry) -> String {
   fn to_checker_type(args: &Vec<Box<Argument>>, tipo: &Box<Term>, index: usize) -> String {
     if index < args.len() {
       let arg = &args[index];
-      format!("(Kind.Term.all {} {} {} λ{} {})", 0, name_to_u64(&arg.name), to_checker_term(&arg.tipo, true, false), arg.name, to_checker_type(args, tipo, index + 1))
+      format!("(Kind.Term.all {} {} {} 63 λ{} λ_ {})", 0, name_to_u64(&arg.name), to_checker_term(&arg.tipo, true, false), arg.name, to_checker_type(args, tipo, index + 1))
     } else {
       to_checker_term(tipo, true, false)
     }
@@ -2073,7 +2084,7 @@ pub fn show_term(term: &Term) -> String {
       args.reverse();
       format!("({} {})", show_term(expr), args.iter().map(|x| show_term(x)).collect::<Vec<String>>().join(" "))
     }
-    Term::All { orig: _, name, tipo, body } => {
+    Term::All { orig: _, name, tipo, body, self_name: _ } => { // TODO show self name
       let body = show_term(body);
       format!("({}: {}) {}", name, show_term(tipo), body)
     }
@@ -2706,7 +2717,7 @@ pub fn erase(book: &Book, term: &Term) -> Box<CompTerm> {
       let argm = erase(book, argm);
       return Box::new(CompTerm::App { func, argm });
     }
-    Term::All { orig: _, name, tipo, body } => {
+    Term::All { .. } => {
       return Box::new(CompTerm::Nil);
     }
     Term::Let { orig: _, name, expr, body } => {
@@ -3220,6 +3231,7 @@ pub fn derive_match(ntyp: &NewType) -> Derived {
       orig: 0,
       name: "x".to_string(),
       tipo: gen_type_ctr(ntyp),
+      self_name: None,
       body: Box::new(Term::Typ { orig: 0 }),
     })
   }));
@@ -3236,6 +3248,7 @@ pub fn derive_match(ntyp: &NewType) -> Derived {
           orig: 0,
           name: arg.name.clone(),
           tipo: arg.tipo.clone(),
+          self_name: None,
           body: ctr_case_type(ntyp, ctr, index + 1),
         });
       } else {
