@@ -1,9 +1,0 @@
-
-
-
-Bool: Type
-Bool = bool(p: Bool -> Type)(true: p(Bool.true))(false: p(Bool.false))(p(bool))
-Bool.true: Bool
-Bool.true = p => t => f => t
-Bool.false: Bool
-Bool.false = p => t => f => f

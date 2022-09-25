@@ -1,0 +1,90 @@
+HVM.log <a: Type> <r: Type> (logged: a) (result: r) {
+  result
+}
+
+Empty: Type
+Empty = empty(p: Empty -> Type)(p(empty))
+
+Bool: Type
+Bool = bool(p: Bool -> Type)(true: (p Bool.true))(false: (p Bool.false))(p(bool))
+Bool.true: Bool { p => t => f => t }
+Bool.false: Bool { p => t => f => f }
+Bool.and: Bool -> Bool -> Bool
+Bool.and = a => b => (a (x => Bool) b Bool.false)
+Bool.or: Bool -> Bool -> Bool
+Bool.or = a => b => (a (x => Bool) Bool.true b)
+
+Equal <t> (a: t) (b: t) : Type
+Equal.refl <t> <a: t> : Equal t a a
+
+Test1: (Equal Bool.true ((Bool.and) Bool.true Bool.true))
+Test1 = Equal.refl
+Test2: (Equal Bool.false ((Bool.and) Bool.true Bool.false))
+Test2 = Equal.refl
+
+Nat: Type
+Nat = nat(p: Nat -> Type)(zero: (p Nat.zero))(succ: (pred: Nat)(p ((Nat.succ) pred)))(p nat)
+Nat.zero: Nat { p => zero => succ => zero }
+Nat.succ: Nat -> Nat { number => p => zero => succ => (succ number) }
+
+Nat.pred: Nat -> Nat { number => (number (x => Nat) Nat.zero pred => pred) }
+
+Nat.from_u60 (n: U60): Nat
+Nat.from_u60 0 = Nat.zero
+Nat.from_u60 n = (Nat.succ) (Nat.from_u60 (- n 1))
+
+Nat.to_u60 (n: Nat): U60 {
+  (n (x => U60) 0 (pred => (+ 1 (Nat.to_u60 pred))))
+}
+
+
+Int: Type
+Int = int(p: Int -> Type)(new: (pos: Nat)(neg: Nat)(p (Int.new pos neg)))(p int)
+Int.new (pos: Nat) (neg: Nat): Int {
+  (pos (x => Int) (p => new => (new Nat.zero neg)) (p_pred => (neg (_ => Int) (p => new => (new ((Nat.succ) p_pred) Nat.zero)) (n_pred => (Int.new p_pred n_pred)))))
+}
+
+
+Nat.add: Nat -> Nat -> Nat { 
+  a => b => (a (_ => Nat) b pred => ((Nat.succ) (((Nat.add) pred b) )))
+}
+
+Int.get_pos: Int -> Nat {
+  int => (int (_ => Nat) (pos => neg => pos))
+}
+Int.get_neg: Int -> Nat {
+  int => (int (_ => Nat) (pos => neg => neg))
+}
+
+Int.sub: Int -> Int -> Int {
+  a => b => (a (_ => Int) (a.pos => a.neg => (b (_ => Int) (b.pos => b.neg => (Int.new ((Nat.add) a.pos b.neg) ((Nat.add) a.neg b.pos))))))
+}
+
+
+// List (item: Type) { list(p: (List item) -> Type)(nil: (p (List.nil item)))(cons: (head: item)(tail: (List item))(p ((List.cons item) head tail)))(p list) }
+
+// List.nil (item: Type): (List item) { p => nil => cons => nil }
+// List.cons (item: Type): (head: item)(tail: (List item))(List item) { head => tail => p => nil => cons => (cons head tail) }
+Nat2: Nat
+Nat2 = (Nat.succ) ((Nat.succ) (Nat.zero))
+Nat4: Nat
+Nat4 = (Nat.succ) ((Nat.succ) ((Nat.succ) ((Nat.succ) (Nat.zero))))
+Nat6: Nat
+Nat6 = (Nat.succ) ((Nat.succ) ((Nat.succ) ((Nat.succ) ((Nat.succ) ((Nat.succ) (Nat.zero))))))
+
+Int.to_u60: Int -> (Pair U60 U60) {
+  i => (Pair.new (Nat.to_u60 ((Int.get_pos) i)) (Nat.to_u60 ((Int.get_neg) i)))
+}
+Int.from_u60 (fst: U60) (snd: U60): Int
+Int.from_u60 fst snd = (Int.new (Nat.from_u60 fst) (Nat.from_u60 snd))
+// 1 - 1 == 0 - 0
+// Test3: (Equal (Int.new ((Nat.succ) Nat.zero) ((Nat.succ) Nat.zero)) (Int.new Nat.zero Nat.zero))
+// Test3 = Equal.refl
+// Test4: (Equal ((Int.sub) (Int.new Nat4 Nat.zero) (Int.new Nat6 Nat.zero)) (Int.new Nat.zero Nat2))
+// Test4 = Equal.refl
+
+Empty.absurd (t: Type) (a: Empty): t
+Empty.absurd t a = (a (x => t))
+Pair <a: Type> <b: Type>: Type
+Pair.new <a: Type> <b: Type> (fst: a) (snd: b): Pair a b
+Main { ((Int.to_u60) ((Int.sub) (Int.from_u60 2 0) (Int.from_u60 4 0))) }

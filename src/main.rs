@@ -289,7 +289,9 @@ pub fn readback_string(rt: &hvm::Runtime, host: u64) -> String {
 fn gen_checker(book: &Book) -> String {
   // Compile the Kind2 file to HVM checker
   let base_check_code = to_checker_book(&book);
-  let mut check_code = CHECKER_HVM.to_string();
+  let prologue_code = to_checker_prologue(&book);
+  let mut check_code = prologue_code;
+  check_code.push_str(CHECKER_HVM);
   check_code.push_str(&base_check_code);
   return check_code;
 }

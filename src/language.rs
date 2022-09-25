@@ -705,6 +705,7 @@ pub fn term_set_origin_file(term: &mut Term, file: usize) {
   }
 }
 
+
 pub fn get_term_origin(term: &Term) -> u64 {
   match term {
     Term::Typ { orig, .. } => *orig,
@@ -1744,11 +1745,14 @@ pub fn load_newtype_cached(cache: &mut HashMap<String, Rc<NewType>>, name: &str)
   return Ok(cache.get(name).unwrap().clone());
 }
 
+pub fn name_or_underscore(name: &Option<String>) -> &str {
+  name.as_ref().map(|x| x.as_ref()).unwrap_or("_")
+}
+
 // Type Checker Compiler
 // =====================
 
-pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
-  println!("{:?}", term);
+pub fn to_checker_term(term: &Term, quote: bool, lhs: bool, hvm_lhs: bool) -> String {
   fn hide(orig: &u64, lhs: bool) -> String {
     if lhs {
       "orig".to_string()
@@ -1772,27 +1776,39 @@ pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
       }
     }
     Term::All { orig, name, tipo, self_name, body } => {
-      format!("(Kind.Term.all {} {} {} {} λ{} λ{} {})", hide(orig,lhs), name_to_u64(name), to_checker_term(tipo, quote, lhs), self_name.clone().map(|x| name_to_u64(&x)).unwrap_or(63), name, self_name.as_ref().map(|x| x.as_ref()).unwrap_or("_"), to_checker_term(body, quote, lhs))
+      if hvm_lhs {
+        format!("(Kind.Term.all {} {} {} {} _)", hide(orig,lhs), name_to_u64(name), to_checker_term(tipo, quote, lhs, hvm_lhs), self_name.clone().map(|x| name_to_u64(&x)).unwrap_or(63))
+      } else {
+        format!("(Kind.Term.all {} {} {} {} λ{} λ{} {})", hide(orig,lhs), name_to_u64(name), to_checker_term(tipo, quote, lhs, hvm_lhs), self_name.clone().map(|x| name_to_u64(&x)).unwrap_or(63), name, name_or_underscore(self_name), to_checker_term(body, quote, lhs, hvm_lhs))
+      }
     }
     Term::Lam { orig, name, body } => {
-      format!("(Kind.Term.lam {} {} λ{} {})", hide(orig,lhs), name_to_u64(name), name, to_checker_term(body, quote, lhs))
+      if hvm_lhs {
+        format!("(Kind.Term.lam {} {} _)", hide(orig,lhs), name_to_u64(name))
+      } else {
+        format!("(Kind.Term.lam {} {} λ{} {})", hide(orig,lhs), name_to_u64(name), name, to_checker_term(body, quote, lhs, hvm_lhs))
+      }
     }
     Term::App { orig, func, argm } => {
-      format!("({} {} {} {})", if quote { "Kind.Term.app" } else { "Kind.Term.eval_app" }, hide(orig,lhs), to_checker_term(func, quote, lhs), to_checker_term(argm, quote, lhs))
+      format!("({} {} {} {})", if quote { "Kind.Term.app" } else { "Kind.Term.eval_app" }, hide(orig,lhs), to_checker_term(func, quote, lhs, hvm_lhs), to_checker_term(argm, quote, lhs, hvm_lhs))
     }
     Term::Let { orig, name, expr, body } => {
-      format!("({} {} {} {} λ{} {})", if quote { "Kind.Term.let" } else { "Kind.Term.eval_let" }, hide(orig,lhs), name_to_u64(name), to_checker_term(expr, quote, lhs), name, to_checker_term(body, quote, lhs))
+      if hvm_lhs {
+        format!("({} {} {} {} _)", if quote { "Kind.Term.let" } else { "Kind.Term.eval_let" }, hide(orig,lhs), name_to_u64(name), to_checker_term(expr, quote, lhs, hvm_lhs))
+      } else {
+        format!("({} {} {} {} λ{} {})", if quote { "Kind.Term.let" } else { "Kind.Term.eval_let" }, hide(orig,lhs), name_to_u64(name), to_checker_term(expr, quote, lhs, hvm_lhs), name, to_checker_term(body, quote, lhs, hvm_lhs))
+      }
     }
     Term::Ann { orig, expr, tipo } => {
-      format!("({} {} {} {})", if quote { "Kind.Term.ann" } else { "Kind.Term.eval_ann" }, hide(orig,lhs), to_checker_term(expr, quote, lhs), to_checker_term(tipo, quote, lhs))
+      format!("({} {} {} {})", if quote { "Kind.Term.ann" } else { "Kind.Term.eval_ann" }, hide(orig,lhs), to_checker_term(expr, quote, lhs, hvm_lhs), to_checker_term(tipo, quote, lhs, hvm_lhs))
     }
     Term::Sub { orig, expr, name, indx, redx } => {
-      format!("({} {} {} {} {} {})", if quote { "Kind.Term.sub" } else { "Kind.Term.eval_sub" }, hide(orig,lhs), name_to_u64(name), indx, redx, to_checker_term(expr, quote, lhs))
+      format!("({} {} {} {} {} {})", if quote { "Kind.Term.sub" } else { "Kind.Term.eval_sub" }, hide(orig,lhs), name_to_u64(name), indx, redx, to_checker_term(expr, quote, lhs, hvm_lhs))
     }
     Term::Ctr { orig, name, args } => {
       let mut args_strs : Vec<String> = Vec::new();
       for arg in args {
-        args_strs.push(format!(" {}", to_checker_term(arg, quote, lhs)));
+        args_strs.push(format!(" {}", to_checker_term(arg, quote, lhs, hvm_lhs)));
       }
       if args.len() >= 7 {
         format!("(Kind.Term.ct{} {}. {} (Kind.Term.args{}{}))", args.len(), name, hide(orig,lhs), args.len(), args_strs.join(""))
@@ -1803,10 +1819,9 @@ pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
     Term::Fun { orig, name, args } => {
       let mut args_strs : Vec<String> = Vec::new();
       for arg in args {
-        args_strs.push(format!(" {}", to_checker_term(arg, quote, lhs)));
+        args_strs.push(format!(" {}", to_checker_term(arg, quote, lhs, hvm_lhs)));
       }
-      let quote = true;
-      if quote {
+      if true {
         if args.len() >= 7 {
           format!("(Kind.Term.fn{} {}. {}(Kind.Term.args{} {}))", args.len(), name, hide(orig,lhs), args.len(), args_strs.join(""))
         } else {
@@ -1827,10 +1842,99 @@ pub fn to_checker_term(term: &Term, quote: bool, lhs: bool) -> String {
     }
     Term::Op2 { orig, oper, val0, val1 } => {
       // TODO: Add operator
-      format!("({} {} {} {} {})", if quote { "Kind.Term.op2" } else { "Kind.Term.eval_op" }, hide(orig,lhs), to_checker_oper(oper), to_checker_term(val0, quote, lhs), to_checker_term(val1, quote, lhs))
+      format!("({} {} {} {} {})", if quote { "Kind.Term.op2" } else { "Kind.Term.eval_op" }, hide(orig,lhs), to_checker_oper(oper), to_checker_term(val0, quote, lhs, hvm_lhs), to_checker_term(val1, quote, lhs, hvm_lhs))
     }
     Term::Hol { orig, numb } => {
       format!("(Kind.Term.hol {} {})", orig, numb)
+    }
+    Term::Mat { .. } => {
+      panic!("Internal error."); // removed after adjust()
+    }
+  }
+}
+
+pub fn to_checker_flat_term(term: &Term, var_depth: &mut Vec<String>, call_depth: u64) -> String {
+  let use_origin = "";
+  match term {
+    Term::Typ { orig } => {
+      format!("(Kind.FlatTerm.typ)")
+    }
+    Term::Var { orig, name } => {
+      if let Some(name_index) = var_depth.iter().position(|x| x == name) {
+        // Bound variable 
+        format!("(Kind.FlatTerm.var {})", name_index)
+      } else {
+        // Unbound variable
+        name.clone()
+      }
+    }
+    Term::All { orig, name, tipo, self_name, body } => {
+      let tipo_string = to_checker_flat_term(tipo, var_depth, call_depth + 1);
+      var_depth.push(name.clone());
+      var_depth.push(name_or_underscore(self_name).to_string());
+      let s = format!("(Kind.FlatTerm.all {} {})", tipo_string, to_checker_flat_term(body, var_depth, call_depth + 1));
+      var_depth.pop();
+      var_depth.pop();
+      s
+    }
+    Term::Lam { orig, name, body } => {
+      var_depth.push(name.clone());
+      let s = format!("(Kind.FlatTerm.lam {})", to_checker_flat_term(body, var_depth, call_depth + 1));
+      var_depth.pop();
+      s
+    }
+    Term::App { orig, func, argm } => {
+      format!("(Kind.FlatTerm.app {} {})", to_checker_flat_term(func, var_depth, call_depth + 1), to_checker_flat_term(argm, var_depth, call_depth + 1))
+    }
+    Term::Let { orig, name, expr, body } => {
+      var_depth.push(name.clone());
+      let s = format!("(Kind.FlatTerm.let {} {})", to_checker_flat_term(expr, var_depth, call_depth + 1), to_checker_flat_term(body, var_depth, call_depth + 1));
+      var_depth.pop();
+      s
+    }
+    Term::Ann { orig, expr, tipo } => {
+      format!("(Kind.FlatTerm.ann {} {})", to_checker_flat_term(expr, var_depth, call_depth + 1), to_checker_flat_term(tipo, var_depth, call_depth + 1))
+    }
+    Term::Sub { orig, expr, name, indx, redx } => {
+      format!("(Kind.FlatTerm.sub {} {} {})", indx, redx, to_checker_flat_term(expr, var_depth, call_depth + 1))
+    }
+    Term::Ctr { orig, name, args } => {
+      let mut args_strs : Vec<String> = Vec::new();
+      for arg in args {
+        args_strs.push(format!(" {}", to_checker_flat_term(arg, var_depth, call_depth + 1)));
+      }
+      if args.len() >= 7 {
+        format!("(Kind.FlatTerm.ct{} {}. (Kind.FlatTerm.args{}{}))", args.len(), name, args.len(), args_strs.join(""))
+      } else {
+        format!("(Kind.FlatTerm.ct{} {}. {})", args.len(), name, args_strs.join(""))
+      }
+    }
+    Term::Fun { orig, name, args } => {
+      let mut args_strs : Vec<String> = Vec::new();
+      for arg in args {
+        args_strs.push(format!(" {}", to_checker_flat_term(arg, var_depth, call_depth + 1)));
+      }
+      if args.len() >= 7 {
+        format!("(Kind.FlatTerm.fn{} {}. (Kind.FlatTerm.args{} {}))", args.len(), name, args.len(), args_strs.join(""))
+      } else {
+        format!("(Kind.FlatTerm.fn{} {}. {})", args.len(), name, args_strs.join(""))
+      }
+    }
+    Term::Hlp { orig } => {
+      format!("(Kind.FlatTerm.hlp)")
+    }
+    Term::U60 { orig } => {
+      format!("(Kind.FlatTerm.u60)")
+    }
+    Term::Num { orig, numb } => {
+      format!("(Kind.FlatTerm.num {})", numb)
+    }
+    Term::Op2 { orig, oper, val0, val1 } => {
+      // TODO: Add operator
+      format!("(Kind.FlatTerm.op2 {} {} {})", to_checker_oper(oper), to_checker_flat_term(val0, var_depth, call_depth + 1), to_checker_flat_term(val1, var_depth, call_depth + 1))
+    }
+    Term::Hol { orig, numb } => {
+      format!("(Kind.FlatTerm.hol {})", numb)
     }
     Term::Mat { .. } => {
       panic!("Internal error."); // removed after adjust()
@@ -1859,13 +1963,25 @@ pub fn to_checker_oper(oper: &Oper) -> String {
   }
 }
 
+fn to_checker_roll_rule(rule: &Rule) -> String {
+  if rule.pats.iter().len() != 0 {
+    // TODO: Right now only rules without arguments are flattened.
+    return String::new();
+  }
+  let mut pats = vec![];
+  let rule_rhs_on_lhs = to_checker_flat_term(&rule.body, &mut Vec::new(), 0);
+  for pat in &rule.pats {
+    pats.push(format!(" {}", to_checker_term(pat, false, true,false)));
+  }
+  format!("(Kind.Term.try_roll orig term {}) = (Pair.new (Kind.Term.fn{} {}. orig{}) Bool.true)\n", rule_rhs_on_lhs, rule.pats.len(), rule.name, pats.join(""))
+}
 pub fn to_checker_entry(entry: &Entry) -> String {
   fn to_checker_type(args: &Vec<Box<Argument>>, tipo: &Box<Term>, index: usize) -> String {
     if index < args.len() {
       let arg = &args[index];
-      format!("(Kind.Term.all {} {} {} 63 λ{} λ_ {})", 0, name_to_u64(&arg.name), to_checker_term(&arg.tipo, true, false), arg.name, to_checker_type(args, tipo, index + 1))
+      format!("(Kind.Term.all {} {} {} 63 λ{} λ_ {})", 0, name_to_u64(&arg.name), to_checker_term(&arg.tipo, true, false, false), arg.name, to_checker_type(args, tipo, index + 1))
     } else {
-      to_checker_term(tipo, true, false)
+      to_checker_term(tipo, true, false, false)
     }
   }
 
@@ -1890,10 +2006,10 @@ pub fn to_checker_entry(entry: &Entry) -> String {
   fn to_checker_rule(rule: &Rule) -> String {
     let mut pats = vec![];
     for pat in &rule.pats {
-      pats.push(format!(" {}", to_checker_term(pat, false, true)));
+      pats.push(format!(" {}", to_checker_term(pat, false, true,false)));
     }
-    let body_rhs = to_checker_term(&rule.body, true, false);
-    let rule_rhs = to_checker_term(&rule.body, false, false);
+    let body_rhs = to_checker_term(&rule.body, true, false, false);
+    let rule_rhs = to_checker_term(&rule.body, false, false, false);
     let mut text = String::new();
     text.push_str(&format!("(Q${} orig{}) = {}\n", rule.name, pats.join(""), body_rhs));
     if rule.name == "HVM.log" {
@@ -1914,6 +2030,7 @@ pub fn to_checker_entry(entry: &Entry) -> String {
 
     return text;
   }
+  
 
   fn to_checker_rule_chk(rule: &Rule, index: usize, vars: &mut u64, args: &mut Vec<String>) -> String {
     if index < rule.pats.len() {
@@ -1995,6 +2112,14 @@ pub fn to_checker_entry(entry: &Entry) -> String {
   return result;
 }
 
+pub fn to_checker_prologue(book: &Book) -> String {
+  let mut result = String::new();
+  for rule in book.entrs.iter().map(|s| &s.1.rules).flatten() {
+    result.push_str(&to_checker_roll_rule(&rule))
+  }
+  result
+}
+
 pub fn to_checker_book(book: &Book) -> String {
   let mut result = String::new();
   result.push_str(&format!("// NOTE: functions with names starting with 'F$' are evaluated differently by the\n"));
@@ -2014,8 +2139,7 @@ pub fn to_checker_book(book: &Book) -> String {
     result.push_str(&to_checker_entry(&entry));
     result.push_str(&format!("\n"));
   }
-  //result.push_str(&format!("\n// Default Cases"));
-  //result.push_str(&format!("\n// -------------\n\n"));
+  result.push_str("// Default cases");
   //for size in 0 .. 9 {
     //let mut vars = vec![];
     //for idx in 0 .. size {
